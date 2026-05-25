@@ -99,6 +99,27 @@ class FakeTable:
 class FakeSupabase:
     def __init__(self, db):
         self.db = db
+        self.auth = self.FakeAuth(self.db)
+
+    class FakeAuth:
+        def __init__(self, db):
+            self.db = db
+
+        def get_user(self, token):
+            prefix = "token_"
+            if not token or not token.startswith(prefix):
+                raise Exception("Invalid token")
+            user_id = token[len(prefix):]
+
+            class UserObj:
+                def __init__(self, uid):
+                    self.id = uid
+
+            class AuthResp:
+                def __init__(self, uid):
+                    self.user = UserObj(uid)
+
+            return AuthResp(user_id)
 
     def table(self, name):
         return FakeTable(self.db, name)
@@ -321,3 +342,10 @@ def test_client(fake_supabase):
         with patch.dict(os.environ, {"ALLOW_DEGRADED_STARTUP": "1"}):
             with TestClient(app) as client:
                 yield client
+
+
+@pytest.fixture
+def auth_headers():
+    def _make(user_id: str):
+        return {"Authorization": f"Bearer token_{user_id}"}
+    return _make

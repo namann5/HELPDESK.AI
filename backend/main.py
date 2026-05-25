@@ -704,16 +704,73 @@ async def log_correction(raw_request: Request):
 # ---------------------------------------------------------------------------
 # Ticket operations (Now via Supabase)
 # ---------------------------------------------------------------------------
-@app.get("/tickets")
-async def get_tickets(company_id: str | None = None):
-    """Fetch persistent tickets from Supabase."""
+def _extract_bearer_token(request: Request) -> str:
+    auth_header = request.headers.get("Authorization", "").strip()
+    if not auth_header:
+        raise HTTPException(status_code=401, detail="Missing bearer token")
+    if not auth_header.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Invalid authorization header")
+    token = auth_header[7:].strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing bearer token")
+    return token
+
+
+def _get_user_context(request: Request) -> dict:
     if not supabase:
         raise HTTPException(status_code=500, detail="Database connection not initialized")
-    
-    query = supabase.table("tickets").select("*").order("created_at", desc=True)
-    if company_id:
-        query = query.eq("company_id", company_id)
-        
+
+    token = _extract_bearer_token(request)
+    try:
+        auth_res = supabase.auth.get_user(token)
+        user = getattr(auth_res, "user", None)
+        user_id = getattr(user, "id", None)
+    except Exception as auth_error:
+        raise HTTPException(status_code=401, detail="Invalid bearer token") from auth_error
+
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid bearer token")
+
+    try:
+        profile_res = (
+            supabase.table("profiles")
+            .select("company_id, company, role")
+            .eq("id", user_id)
+            .maybe_single()
+            .execute()
+        )
+        profile = profile_res.data or {}
+    except Exception as profile_error:
+        raise HTTPException(status_code=503, detail="Failed to resolve auth profile") from profile_error
+
+    if not profile:
+        raise HTTPException(status_code=403, detail="Profile not found")
+
+    company_id = profile.get("company_id")
+    if not company_id:
+        raise HTTPException(status_code=403, detail="User has no tenant assignment")
+
+    return {
+        "user_id": user_id,
+        "company_id": company_id,
+        "company": profile.get("company"),
+        "role": profile.get("role"),
+    }
+
+
+@app.get("/tickets")
+async def get_tickets(request: Request, company_id: str | None = None):
+    """Fetch persistent tickets from Supabase."""
+    user_ctx = _get_user_context(request)
+    if company_id and company_id != user_ctx["company_id"]:
+        raise HTTPException(status_code=403, detail="Cross-tenant access denied")
+
+    query = (
+        supabase.table("tickets")
+        .select("*")
+        .eq("company_id", user_ctx["company_id"])
+        .order("created_at", desc=True)
+    )
     res = query.execute()
     return res.data
 
@@ -897,14 +954,14 @@ async def save_ticket(request_body: TicketSaveRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/tickets/{ticket_id}")
-async def get_ticket_by_id(ticket_id: str):
+async def get_ticket_by_id(ticket_id: str, request: Request):
     """Fetch single persistent ticket."""
-    if not supabase:
-        raise HTTPException(status_code=500, detail="Database connection not initialized")
-    
+    user_ctx = _get_user_context(request)
     res = supabase.table("tickets").select("*").eq("id", ticket_id).single().execute()
     if not res.data:
         raise HTTPException(status_code=404, detail="Ticket not found")
+    if res.data.get("company_id") != user_ctx["company_id"]:
+        raise HTTPException(status_code=403, detail="Cross-tenant access denied")
     return res.data
 
 
