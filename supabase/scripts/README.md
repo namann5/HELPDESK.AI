@@ -23,7 +23,8 @@ python supabase/scripts/setup_vault.py
 Or using a `.env` file (loaded automatically if you have python-dotenv installed):
 
 ```bash
-set SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.coset SUPABASE_SERVICE_KEY=your_service_role_key_here
+set SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
+set SUPABASE_SERVICE_KEY=your_service_role_key_here
 python supabase/scripts/setup_vault.py
 ```
 
