@@ -1,4 +1,3 @@
-javascript
 // frontend/vite.config.js
 import { defineConfig } from 'vite';
 import crypto from 'crypto';
